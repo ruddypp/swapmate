@@ -8,8 +8,8 @@ import { WalletButton } from "@/components/ui/WalletButton";
 
 interface NavbarProps {
   isApp?: boolean;
-  activeTab?: "swap" | "history";
-  setActiveTab?: (tab: "swap" | "history") => void;
+  activeTab?: "swap" | "history" | "portfolio";
+  setActiveTab?: (tab: "swap" | "history" | "portfolio") => void;
   className?: string;
 }
 
@@ -35,26 +35,19 @@ export function Navbar({ isApp = false, activeTab, setActiveTab, className = "" 
           <>
             <Separator orientation="vertical" className="h-5 hidden md:block" />
             <nav className="hidden md:flex items-center gap-4">
-              <button
-                onClick={() => setActiveTab("swap")}
-                className={`text-[11px] tracking-widest uppercase transition-colors duration-150 ${
-                  activeTab === "swap"
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Swap
-              </button>
-              <button
-                onClick={() => setActiveTab("history")}
-                className={`text-[11px] tracking-widest uppercase transition-colors duration-150 ${
-                  activeTab === "history"
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                History
-              </button>
+              {(["swap", "history", "portfolio"] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`text-[11px] tracking-widest uppercase capitalize transition-colors duration-150 ${
+                    activeTab === tab
+                      ? "text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
             </nav>
           </>
         )}

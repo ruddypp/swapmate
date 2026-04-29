@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import Link from "next/link";
 import { Brain, Zap, ShieldCheck } from "lucide-react";
 import BorderGlow from "@/components/BorderGlow";
@@ -9,7 +9,7 @@ import { Navbar } from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 
 export default function LandingPage() {
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     show: {
       opacity: 1,
@@ -17,7 +17,7 @@ export default function LandingPage() {
     },
   };
 
-  const itemVariants = {
+  const itemVariants: Variants = {
     hidden: { opacity: 0, y: 20 },
     show: {
       opacity: 1,

@@ -6,22 +6,22 @@ import { useAppKitAccount } from "@reown/appkit/react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import type { AIMessage, ParsedSwapIntent, QuoteResult } from "@/lib/swap/types";
+import type { AIMessage, ParsedSwapIntent, QuoteResult, BatchSwapIntent, BatchSwapItem } from "@/lib/swap/types";
 import type { Token } from "@/lib/swap/types";
 
 interface AIAssistantProps {
   onSwapIntent?: (intent: ParsedSwapIntent) => void;
+  onBatchSwapIntent?: (batch: BatchSwapIntent) => void;
   quoteContext?: {
     tokenIn?: Token;
     tokenOut?: Token;
     amountIn?: string;
-    quote?: QuoteResult;
+    quote?: QuoteResult | null;
   };
 }
 
 function parseIntent(text: string): ParsedSwapIntent | null {
   try {
-    // Try to find JSON block with or without markdown tags
     const jsonMatch = text.match(/\{[\s\S]*"intent"[\s\S]*\}/i);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
@@ -32,8 +32,29 @@ function parseIntent(text: string): ParsedSwapIntent | null {
           tokenOut: parsed.tokenOut || parsed.TokenOut,
           amount: parsed.amount || parsed.Amount,
           slippage: parsed.slippage || parsed.Slippage,
+          slippageBps: parsed.slippageBps,
+          riskNote: parsed.riskNote,
           action: (parsed.action || parsed.Action)?.toLowerCase()
         };
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function parseBatchIntent(text: string): BatchSwapIntent | null {
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*"intent"[\s\S]*\}/i);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const intentValue = (parsed.intent || parsed.Intent)?.toLowerCase();
+      if (intentValue === "batch_swap" && Array.isArray(parsed.swaps)) {
+        const swaps: BatchSwapItem[] = parsed.swaps.map((s: ParsedSwapIntent, i: number) => ({
+          ...s,
+          id: `batch-${Date.now()}-${i}`,
+          status: "pending" as const,
+        }));
+        return { swaps };
       }
     }
   } catch {}
@@ -73,7 +94,7 @@ function MessageBubble({ msg }: { msg: AIMessage }) {
   );
 }
 
-export function AIAssistant({ onSwapIntent, quoteContext }: AIAssistantProps) {
+export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext }: AIAssistantProps) {
   const { isConnected } = useAppKitAccount();
   const [messages, setMessages] = useState<AIMessage[]>([
     {
@@ -162,10 +183,15 @@ export function AIAssistant({ onSwapIntent, quoteContext }: AIAssistantProps) {
       
       fullText = currentText;
 
-      // Try to parse swap intent
-      const intent = parseIntent(fullText);
-      if (intent && onSwapIntent) {
-        onSwapIntent(intent);
+      // Try to parse batch swap intent first, then single swap
+      const batchIntent = parseBatchIntent(fullText);
+      if (batchIntent && onBatchSwapIntent) {
+        onBatchSwapIntent(batchIntent);
+      } else {
+        const intent = parseIntent(fullText);
+        if (intent && onSwapIntent) {
+          onSwapIntent(intent);
+        }
       }
     } catch (err) {
       setMessages((prev) =>

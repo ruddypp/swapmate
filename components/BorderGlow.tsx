@@ -36,7 +36,7 @@ function buildGradientVars(colors: string[]) {
 function easeOutCubic(x: number) { return 1 - Math.pow(1 - x, 3); }
 function easeInCubic(x: number) { return x * x * x; }
 
-function animateValue({ start = 0, end = 100, duration = 1000, delay = 0, ease = easeOutCubic, onUpdate, onEnd }: any) {
+function animateValue({ start = 0, end = 100, duration = 1000, delay = 0, ease = easeOutCubic, onUpdate, onEnd }: { start?: number; end?: number; duration?: number; delay?: number; ease?: (x: number) => number; onUpdate: (v: number) => void; onEnd?: () => void }) {
   const t0 = performance.now() + delay;
   function tick() {
     const elapsed = performance.now() - t0;
@@ -77,14 +77,14 @@ const BorderGlow: React.FC<BorderGlowProps> = ({
   colors = ['#c084fc', '#f472b6', '#38bdf8'],
   fillOpacity = 0.5,
 }) => {
-  const cardRef = useRef(null);
+  const cardRef = useRef<HTMLDivElement>(null);
 
-  const getCenterOfElement = useCallback((el) => {
+  const getCenterOfElement = useCallback((el: HTMLElement) => {
     const { width, height } = el.getBoundingClientRect();
     return [width / 2, height / 2];
   }, []);
 
-  const getEdgeProximity = useCallback((el, x, y) => {
+  const getEdgeProximity = useCallback((el: HTMLElement, x: number, y: number) => {
     const [cx, cy] = getCenterOfElement(el);
     const dx = x - cx;
     const dy = y - cy;
@@ -95,7 +95,7 @@ const BorderGlow: React.FC<BorderGlowProps> = ({
     return Math.min(Math.max(1 / Math.min(kx, ky), 0), 1);
   }, [getCenterOfElement]);
 
-  const getCursorAngle = useCallback((el, x, y) => {
+  const getCursorAngle = useCallback((el: HTMLElement, x: number, y: number) => {
     const [cx, cy] = getCenterOfElement(el);
     const dx = x - cx;
     const dy = y - cy;
@@ -106,7 +106,7 @@ const BorderGlow: React.FC<BorderGlowProps> = ({
     return degrees;
   }, [getCenterOfElement]);
 
-  const handlePointerMove = useCallback((e) => {
+  const handlePointerMove = useCallback((e: PointerEvent) => {
     const card = cardRef.current;
     if (!card) return;
 
@@ -129,15 +129,15 @@ const BorderGlow: React.FC<BorderGlowProps> = ({
     card.classList.add('sweep-active');
     card.style.setProperty('--cursor-angle', `${angleStart}deg`);
 
-    animateValue({ duration: 500, onUpdate: v => card.style.setProperty('--edge-proximity', v) });
-    animateValue({ ease: easeInCubic, duration: 1500, end: 50, onUpdate: v => {
+    animateValue({ duration: 500, onUpdate: (v: number) => card.style.setProperty('--edge-proximity', String(v)) });
+    animateValue({ ease: easeInCubic, duration: 1500, end: 50, onUpdate: (v: number) => {
       card.style.setProperty('--cursor-angle', `${(angleEnd - angleStart) * (v / 100) + angleStart}deg`);
     }});
-    animateValue({ ease: easeOutCubic, delay: 1500, duration: 2250, start: 50, end: 100, onUpdate: v => {
+    animateValue({ ease: easeOutCubic, delay: 1500, duration: 2250, start: 50, end: 100, onUpdate: (v: number) => {
       card.style.setProperty('--cursor-angle', `${(angleEnd - angleStart) * (v / 100) + angleStart}deg`);
     }});
     animateValue({ ease: easeInCubic, delay: 2500, duration: 1500, start: 100, end: 0,
-      onUpdate: v => card.style.setProperty('--edge-proximity', v),
+      onUpdate: (v: number) => card.style.setProperty('--edge-proximity', String(v)),
       onEnd: () => card.classList.remove('sweep-active'),
     });
   }, [animated]);

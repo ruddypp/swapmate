@@ -62,5 +62,23 @@ export interface ParsedSwapIntent {
   tokenOut?: string; // symbol
   amount?: string;   // human readable
   slippage?: number;
+  slippageBps?: number;  // AI-suggested slippage override
+  riskNote?: string;     // AI risk advisory message
   action?: "quote" | "execute";
+}
+
+// ─── BATCH SWAP ───────────────────────────────────────
+
+export type BatchSwapStatus = "pending" | "quoting" | "swapping" | "done" | "error";
+
+export interface BatchSwapItem extends ParsedSwapIntent {
+  id: string;
+  status: BatchSwapStatus;
+  txHash?: string;
+  errorMsg?: string;
+  quote?: QuoteResult;
+}
+
+export interface BatchSwapIntent {
+  swaps: BatchSwapItem[];
 }

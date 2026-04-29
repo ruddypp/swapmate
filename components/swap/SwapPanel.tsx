@@ -15,16 +15,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Token, QuoteResult, ParsedSwapIntent, SwapRecord } from "@/lib/swap/types";
+import type { Token, QuoteResult, ParsedSwapIntent, SwapRecord, BatchSwapIntent, BatchSwapItem } from "@/lib/swap/types";
 import { SEPOLIA_TOKENS, NATIVE_ETH, USDC_SEPOLIA } from "@/lib/swap/tokens";
 import { formatAmount, parseAmount } from "@/lib/swap/quote";
 import { ensureApprovals, buildSwapCalldata, executeSwapTx } from "@/lib/swap/execute";
+import { BatchSwapCard } from "./BatchSwapCard";
+import { RiskBanner } from "./RiskBanner";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
 interface SwapPanelProps {
   prefillIntent?: ParsedSwapIntent;
+  batchIntent?: BatchSwapIntent;
   onClearIntent?: () => void;
+  onClearBatch?: () => void;
   onSwapComplete?: (record: SwapRecord) => void;
   onQuoteUpdate?: (context: {
     tokenIn?: Token;
@@ -94,7 +98,7 @@ const STEP_LABELS: Record<SwapStep, string> = {
 
 // ─── SWAP PANEL ───────────────────────────────────────────────────────────────
 
-export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClearIntent }: SwapPanelProps) {
+export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClearIntent, batchIntent, onClearBatch }: SwapPanelProps) {
   const { address, isConnected } = useAppKitAccount();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
@@ -115,6 +119,15 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
   const [txHash, setTxHash] = useState<string | null>(null);
   const [swapError, setSwapError] = useState<string | null>(null);
 
+  // AI overrides
+  const [aiRiskNote, setAiRiskNote] = useState<string | null>(null);
+  const [aiTunedSlippage, setAiTunedSlippage] = useState(false);
+
+  // Batch swap state
+  const [batchItems, setBatchItems] = useState<BatchSwapItem[]>([]);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const isBatchMode = batchItems.length > 0;
+
   // Apply prefill intent from AI
   const applyIntent = useCallback((intent: ParsedSwapIntent) => {
     if (intent.tokenIn) {
@@ -130,7 +143,17 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
       if (t) setTokenOut(t);
     }
     if (intent.amount) setAmountIn(intent.amount);
-    if (intent.slippage) setSlippageBps(Math.round(intent.slippage * 100));
+
+    // AI slippage override (slippageBps takes priority over old slippage field)
+    if (intent.slippageBps) {
+      setSlippageBps(intent.slippageBps);
+      setAiTunedSlippage(true);
+    } else if (intent.slippage) {
+      setSlippageBps(Math.round(intent.slippage * 100));
+    }
+
+    // AI risk note
+    if (intent.riskNote) setAiRiskNote(intent.riskNote);
 
     if (intent.action === "execute") {
       setAutoExecute(true);
@@ -165,6 +188,15 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quote, autoExecute, swapStep, isConnected]);
+
+  // Apply batch intent from AI
+  useEffect(() => {
+    if (batchIntent && batchIntent.swaps.length > 0) {
+      setBatchItems(batchIntent.swaps);
+      setAiRiskNote(null);
+      onClearBatch?.();
+    }
+  }, [batchIntent, onClearBatch]);
 
   function swapTokens() {
     setTokenIn(tokenOut);
@@ -279,6 +311,65 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
     }
   }
 
+  // ─── BATCH EXECUTION LOOP ──────────────────────────────────────────────────
+
+  async function executeBatch() {
+    if (!address || !walletClient || !publicClient) return;
+    setBatchRunning(true);
+
+    for (let i = 0; i < batchItems.length; i++) {
+      const item = batchItems[i];
+      if (item.status === "done") continue;
+
+      const tokenIn = SEPOLIA_TOKENS.find(t => t.symbol.toLowerCase() === item.tokenIn?.toLowerCase());
+      const tokenOut = SEPOLIA_TOKENS.find(t => t.symbol.toLowerCase() === item.tokenOut?.toLowerCase());
+      if (!tokenIn || !tokenOut || !item.amount) continue;
+
+      // Step 1: Get quote
+      setBatchItems(prev => prev.map((it, idx) => idx === i ? { ...it, status: "quoting" } : it));
+      try {
+        const rawAmount = parseAmount(item.amount, tokenIn.decimals);
+        const slipBps = item.slippageBps ?? 50;
+        const qRes = await fetch("/api/swap/quote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tokenIn, tokenOut, amountIn: rawAmount, slippageBps: slipBps }),
+        });
+        if (!qRes.ok) throw new Error("Quote failed");
+        const quote: QuoteResult = await qRes.json();
+
+        // Step 2: Execute swap
+        setBatchItems(prev => prev.map((it, idx) => idx === i ? { ...it, status: "swapping", quote } : it));
+
+        const rawIn = BigInt(rawAmount);
+        if (!tokenIn.isNative) {
+          await ensureApprovals(tokenIn, rawIn, address as `0x${string}`, publicClient, walletClient);
+        }
+        const calldata = buildSwapCalldata(tokenIn, tokenOut, rawIn, quote);
+        const hash = await executeSwapTx(calldata, address as `0x${string}`, walletClient, publicClient);
+        await publicClient.waitForTransactionReceipt({ hash });
+        setBatchItems(prev => prev.map((it, idx) => idx === i ? { ...it, status: "done", txHash: hash } : it));
+
+        // Save to history
+        const record: SwapRecord = {
+          id: hash, timestamp: Date.now(), tokenIn, tokenOut,
+          amountIn: item.amount, amountOut: formatAmount(quote.amountOut, tokenOut.decimals),
+          txHash: hash, status: "confirmed", chainId: 11155111,
+        };
+        try {
+          const prev = JSON.parse(localStorage.getItem("swapmate_history") ?? "[]");
+          localStorage.setItem("swapmate_history", JSON.stringify([record, ...prev].slice(0, 20)));
+        } catch {}
+        onSwapComplete?.(record);
+
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed";
+        setBatchItems(prev => prev.map((it, idx) => idx === i ? { ...it, status: "error", errorMsg: msg.slice(0, 60) } : it));
+      }
+    }
+    setBatchRunning(false);
+  }
+
   const amountOut = quote ? formatAmount(quote.amountOut, tokenOut.decimals) : "";
   const isBusy = swapStep !== "idle" && swapStep !== "done";
 
@@ -288,10 +379,64 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
     setTxHash(null);
     setSwapError(null);
     setAmountIn("");
+    setAiRiskNote(null);
+    setAiTunedSlippage(false);
+  }
+
+  function resetBatch() {
+    setBatchItems([]);
+    setBatchRunning(false);
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+
+      {/* ── BATCH MODE UI ── */}
+      {isBatchMode && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground">
+              Batch Plan — {batchItems.length} swaps
+            </p>
+            {!batchRunning && (
+              <button onClick={resetBatch} className="text-[10px] text-muted-foreground hover:text-foreground tracking-widest uppercase transition-colors">
+                Clear
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            {batchItems.map((item, idx) => (
+              <BatchSwapCard key={item.id} item={item} index={idx} />
+            ))}
+          </div>
+
+          {/* Batch Execute / Done */}
+          {batchItems.every(it => it.status === "done") ? (
+            <button onClick={resetBatch} className="w-full text-[10px] text-emerald-400 hover:text-emerald-300 tracking-widest uppercase transition-colors py-2 border border-emerald-500/20 rounded-xl">
+              All Done — New Swap
+            </button>
+          ) : (
+            <Button
+              id="batch-execute-btn"
+              onClick={executeBatch}
+              disabled={batchRunning || !isConnected}
+              className="w-full rounded-sm uppercase tracking-widest text-[11px] font-medium h-11 bg-primary hover:bg-primary/90 text-primary-foreground"
+            >
+              {batchRunning ? "Executing..." : `Execute All (${batchItems.filter(it => it.status !== "done").length} remaining)`}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* ── SINGLE SWAP MODE UI ── */}
+      {!isBatchMode && (
+        <div className="space-y-6">
+      {/* AI Risk Note Banner */}
+      {aiRiskNote && (
+        <RiskBanner message={aiRiskNote} severity="warning" />
+      )}
+
       {/* Token In */}
       <div className="space-y-2">
         <TokenSelector
@@ -349,7 +494,12 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
 
       {/* Slippage */}
       <div className="space-y-1.5">
-        <p className="text-label">Slippage Tolerance</p>
+        <div className="flex items-center justify-between">
+          <p className="text-label">Slippage Tolerance</p>
+          {aiTunedSlippage && (
+            <span className="text-[9px] font-mono text-primary tracking-wider animate-pulse">⚡ AI TUNED</span>
+          )}
+        </div>
         <div className="flex gap-2">
           {SLIPPAGE_OPTIONS.map((opt) => (
             <button
@@ -504,6 +654,8 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
           </button>
         )}
       </div>
+      </div>
+      )}
     </div>
   );
 }
