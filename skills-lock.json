@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "skills": {
+    "app-intents": {
+      "source": "dpearson2699/swift-ios-skills",
+      "sourceType": "github",
+      "skillPath": "skills/app-intents/SKILL.md",
+      "computedHash": "e414271dcda80376e454ca3c257dd17e8bfe0e0007ad035d459a4f752f5c4695"
+    },
+    "intent-framed-agent": {
+      "source": "pskoett/pskoett-ai-skills",
+      "sourceType": "github",
+      "skillPath": "skills/intent-framed-agent/SKILL.md",
+      "computedHash": "42dbea72f7ae9c1bebc070531f062892bf53af41d174ddd856ff72da8b0d9ec7"
+    },
+    "swap-integration": {
+      "source": "uniswap/uniswap-ai",
+      "sourceType": "github",
+      "skillPath": "packages/plugins/uniswap-trading/skills/swap-integration/SKILL.md",
+      "computedHash": "093f10ec4ac9b71cfd5716c3a95a85323be6d594334bd35d714b592e3d1d51ba"
+    },
+    "ui-design": {
+      "source": "shajith003/awesome-claude-skills",
+      "sourceType": "github",
+      "skillPath": "ui-design/SKILL.md",
+      "computedHash": "841ae21b87a7e12a46fe036051a6d94447fc41f6cf520872736c40870c61cc6c"
+    },
+    "wagmi": {
+      "source": "0xsardius/onchain-typescript-skills",
+      "sourceType": "github",
+      "skillPath": "skills/wagmi/SKILL.md",
+      "computedHash": "eb5842248354ca8f16d121d38b8ee1c367a58c5f506cb5e1bbf3312fd57a352e"
+    },
+    "web3-frontend": {
+      "source": "pluginagentmarketplace/custom-plugin-blockchain",
+      "sourceType": "github",
+      "skillPath": "skills/web3-frontend/SKILL.md",
+      "computedHash": "efe9f72a11640c7147f9aef0acea69ef661723891f6f3d8dd7d74a1b3473f124"
+    }
+  }
+}
