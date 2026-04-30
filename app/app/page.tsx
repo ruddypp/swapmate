@@ -22,6 +22,7 @@ export default function Home() {
   }>({});
   const [historyTrigger, setHistoryTrigger] = useState(0);
   const [activeTab, setActiveTab] = useState<"swap" | "history" | "portfolio">("swap");
+  const [assistantPrompt, setAssistantPrompt] = useState<{ id: number; text: string } | undefined>();
   const [portfolioContext, setPortfolioContext] = useState<PortfolioContextSnapshot>({
     status: "disconnected",
     totalUsd: 0,
@@ -54,6 +55,10 @@ export default function Home() {
   const handleSwapComplete = useCallback(() => {
     setHistoryTrigger((n) => n + 1);
     setActiveTab("history");
+  }, []);
+
+  const handleAskAssistant = useCallback((text: string) => {
+    setAssistantPrompt({ id: Date.now(), text });
   }, []);
 
   const containerVariants: Variants = {
@@ -175,6 +180,7 @@ export default function Home() {
                 <PortfolioPanel
                   onSwapIntent={handleSwapIntent}
                   onPortfolioContextChange={setPortfolioContext}
+                  onAskAssistant={handleAskAssistant}
                 />
               </motion.div>
             )}
@@ -190,6 +196,7 @@ export default function Home() {
               onBatchSwapIntent={handleBatchSwapIntent}
               quoteContext={quoteContext}
               appContext={{ activeTab, portfolio: portfolioContext }}
+              queuedPrompt={assistantPrompt}
             />
         </div>
       </motion.main>

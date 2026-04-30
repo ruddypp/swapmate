@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { PortfolioPieChart } from "./PortfolioPieChart";
 import { TokenBalanceRow } from "./TokenBalanceRow";
 import { InsightCard } from "./InsightCard";
+import { StrategyMissions } from "./StrategyMissions";
 import { fetchWalletBalances } from "@/lib/portfolio/balances";
 import type {
   TokenBalance,
@@ -29,6 +30,7 @@ import type { ParsedSwapIntent } from "@/lib/swap/types";
 interface PortfolioPanelProps {
   onSwapIntent: (intent: ParsedSwapIntent) => void;
   onPortfolioContextChange?: (context: PortfolioContextSnapshot) => void;
+  onAskAssistant?: (prompt: string) => void;
 }
 
 function OverviewCard({
@@ -113,7 +115,7 @@ function serializeBalancesForAI(balances: TokenBalance[]) {
   }));
 }
 
-export function PortfolioPanel({ onSwapIntent, onPortfolioContextChange }: PortfolioPanelProps) {
+export function PortfolioPanel({ onSwapIntent, onPortfolioContextChange, onAskAssistant }: PortfolioPanelProps) {
   const { address, isConnected } = useAppKitAccount();
   const publicClient = usePublicClient();
 
@@ -421,6 +423,14 @@ export function PortfolioPanel({ onSwapIntent, onPortfolioContextChange }: Portf
             </AnimatePresence>
           </section>
         </div>
+
+        <StrategyMissions
+          address={address}
+          balances={balances}
+          analysis={analysis}
+          onSwapIntent={onSwapIntent}
+          onAskAssistant={onAskAssistant}
+        />
       </div>
     </div>
   );

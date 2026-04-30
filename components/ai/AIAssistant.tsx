@@ -25,6 +25,10 @@ interface AIAssistantProps {
     activeTab: "swap" | "history" | "portfolio";
     portfolio: PortfolioContextSnapshot;
   };
+  queuedPrompt?: {
+    id: number;
+    text: string;
+  };
 }
 
 interface SwapHistoryContext {
@@ -197,7 +201,7 @@ function MessageBubble({ msg }: { msg: AIMessage }) {
   );
 }
 
-export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext, appContext }: AIAssistantProps) {
+export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext, appContext, queuedPrompt }: AIAssistantProps) {
   const { isConnected, address } = useAppKitAccount();
   const [messages, setMessages] = useState<AIMessage[]>([
     {
@@ -228,10 +232,23 @@ export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext, app
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quoteContext?.quote]);
 
+  useEffect(() => {
+    if (!queuedPrompt?.text || isStreaming) return;
+
+    const id = window.setTimeout(() => {
+      sendMessage(queuedPrompt.text);
+    }, 0);
+
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queuedPrompt?.id]);
+
   async function sendMessage(
     text: string,
     ctx?: AIAssistantProps["quoteContext"]
   ) {
+    if (isStreaming) return;
+
     const userMsg: AIMessage = {
       id: crypto.randomUUID(),
       role: "user",
