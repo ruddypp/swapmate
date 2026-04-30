@@ -26,3 +26,20 @@ export interface PortfolioAnalysis {
   riskLevel: "low" | "medium" | "high";
   suggestions: Suggestion[];
 }
+
+export interface PortfolioContextSnapshot {
+  status: "disconnected" | "loading" | "ready" | "empty" | "error";
+  updatedAt?: string;
+  totalUsd: number;
+  stableShare: number;
+  volatileShare: number;
+  balances: Array<{
+    symbol: string;
+    name: string;
+    human: string;
+    percentage: number;
+    usdValue: number;
+  }>;
+  analysis?: PortfolioAnalysis | null;
+  error?: string;
+}

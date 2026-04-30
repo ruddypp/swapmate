@@ -157,6 +157,7 @@ export function buildSwapCalldata(
     zeroForOne = true,
     poolFee = 3000,
     tickSpacing = 60,
+    hookAddress = ZERO_ADDRESS,
     amountOutMin,
   } = quote;
 
@@ -171,7 +172,7 @@ export function buildSwapCalldata(
         currency1,
         fee: poolFee,
         tickSpacing,
-        hooks: ZERO_ADDRESS,
+        hooks: hookAddress,
       },
       zeroForOne,
       amountIn: rawAmountIn.toString(),
@@ -213,6 +214,7 @@ export async function executeSwapTx(
   walletClient: WalletClient,
   publicClient: PublicClient
 ): Promise<`0x${string}`> {
+  void publicClient;
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200); // 20 min
 
   const hash = await walletClient.writeContract({

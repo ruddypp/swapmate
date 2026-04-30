@@ -128,6 +128,8 @@ export async function getQuote(params: QuoteParams): Promise<QuoteResult> {
         route: "SINGLE_HOP",
         poolFee: fee,
         tickSpacing,
+        hookAddress: ZERO_ADDRESS,
+        hookLabel: "No custom hook",
         currency0,
         currency1,
         zeroForOne,

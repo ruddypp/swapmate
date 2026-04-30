@@ -11,10 +11,10 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "messages must be an array" }, { status: 400 });
     }
 
-    // Build system prompt with optional swap context
+    // Build system prompt with optional app context: swap, history, portfolio, and active tab.
     let systemPrompt = SWAPMATE_SYSTEM_PROMPT;
     if (context) {
-      systemPrompt += `\n\nCurrent swap context:\n${JSON.stringify(context, null, 2)}`;
+      systemPrompt += `\n\nCurrent app context:\n${JSON.stringify(context, null, 2)}`;
     }
 
     const stream = await groq.chat.completions.create({
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       ],
       stream: true,
       temperature: 0.3,
-      max_tokens: 512,
+      max_tokens: 800,
     });
 
     // Stream the response

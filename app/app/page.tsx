@@ -2,14 +2,14 @@
 
 import { useState, useCallback } from "react";
 import { motion, type Variants } from "framer-motion";
-import { Separator } from "@/components/ui/separator";
 import { SwapPanel } from "@/components/swap/SwapPanel";
 import { SwapHistory } from "@/components/swap/SwapHistory";
 import { AIAssistant } from "@/components/ai/AIAssistant";
 import { PortfolioPanel } from "@/components/portfolio/PortfolioPanel";
 import { Navbar } from "@/components/Navbar";
-import type { ParsedSwapIntent, QuoteResult, SwapRecord, BatchSwapIntent } from "@/lib/swap/types";
+import type { ParsedSwapIntent, QuoteResult, BatchSwapIntent } from "@/lib/swap/types";
 import type { Token } from "@/lib/swap/types";
+import type { PortfolioContextSnapshot } from "@/lib/portfolio/types";
 
 export default function Home() {
   const [prefillIntent, setPrefillIntent] = useState<ParsedSwapIntent | undefined>();
@@ -22,6 +22,14 @@ export default function Home() {
   }>({});
   const [historyTrigger, setHistoryTrigger] = useState(0);
   const [activeTab, setActiveTab] = useState<"swap" | "history" | "portfolio">("swap");
+  const [portfolioContext, setPortfolioContext] = useState<PortfolioContextSnapshot>({
+    status: "disconnected",
+    totalUsd: 0,
+    stableShare: 0,
+    volatileShare: 0,
+    balances: [],
+    analysis: null,
+  });
 
   const handleSwapIntent = useCallback((intent: ParsedSwapIntent) => {
     setPrefillIntent(intent);
@@ -43,7 +51,7 @@ export default function Home() {
     setBatchIntent(undefined);
   }, []);
 
-  const handleSwapComplete = useCallback((record: SwapRecord) => {
+  const handleSwapComplete = useCallback(() => {
     setHistoryTrigger((n) => n + 1);
     setActiveTab("history");
   }, []);
@@ -66,7 +74,7 @@ export default function Home() {
       variants={containerVariants}
       initial="hidden"
       animate="show"
-      className="min-h-screen flex flex-col relative overflow-hidden"
+      className="h-[100dvh] max-h-[100dvh] min-h-0 flex flex-col relative overflow-hidden"
     >
       {/* Background Glow */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[300px] bg-primary/5 rounded-full blur-[100px] pointer-events-none" />
@@ -79,11 +87,11 @@ export default function Home() {
       />
 
       {/* ── MAIN ────────────────────────────────────────── */}
-      <motion.main variants={itemVariants} className="flex-1 flex flex-col md:flex-row relative z-10">
+      <motion.main variants={itemVariants} className="flex-1 min-h-0 flex flex-col md:flex-row relative z-10 overflow-hidden">
         {/* Left: Swap / History / Portfolio */}
         <div className="flex-1 border-r border-border flex flex-col min-h-0">
           {/* Section header */}
-          <div className="px-6 py-4 border-b border-border">
+          <div className="px-6 py-3 border-b border-border shrink-0">
             <div className="flex gap-6 md:hidden mb-3">
               {(["swap", "history", "portfolio"] as const).map(tab => (
                 <button
@@ -99,7 +107,7 @@ export default function Home() {
             </div>
             {activeTab === "swap" ? (
               <>
-                <h1 className="text-2xl font-semibold tracking-tight">
+                <h1 className="text-xl font-semibold tracking-tight">
                   Token Swap
                 </h1>
                 <p className="text-sm text-muted-foreground mt-1">
@@ -108,7 +116,7 @@ export default function Home() {
               </>
             ) : activeTab === "history" ? (
               <>
-                <h1 className="text-2xl font-semibold tracking-tight">
+                <h1 className="text-xl font-semibold tracking-tight">
                   Swap History
                 </h1>
                 <p className="text-sm text-muted-foreground mt-0.5">
@@ -117,7 +125,7 @@ export default function Home() {
               </>
             ) : (
               <>
-                <h1 className="text-2xl font-semibold tracking-tight">
+                <h1 className="text-xl font-semibold tracking-tight">
                   AI Portfolio
                 </h1>
                 <p className="text-sm text-muted-foreground mt-0.5">
@@ -128,14 +136,14 @@ export default function Home() {
           </div>
 
           {/* Content */}
-          <div className="flex-1 overflow-y-auto px-6 py-6">
+          <div className="flex-1 min-h-0 overflow-hidden px-4 py-4 sm:px-6">
             {activeTab === "swap" ? (
               <motion.div
                 key="swap"
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.25 }}
-                className="max-w-sm"
+                className="mx-auto h-full min-h-0 w-full max-w-6xl"
               >
                 <SwapPanel
                   prefillIntent={prefillIntent}
@@ -152,6 +160,7 @@ export default function Home() {
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.25 }}
+                className="h-full overflow-y-auto custom-scrollbar"
               >
                 <SwapHistory refreshTrigger={historyTrigger} />
               </motion.div>
@@ -161,9 +170,12 @@ export default function Home() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.25 }}
-                className="h-full -mx-6 -my-6"
+                className="h-full -mx-4 -my-4 sm:-mx-6"
               >
-                <PortfolioPanel onSwapIntent={handleSwapIntent} />
+                <PortfolioPanel
+                  onSwapIntent={handleSwapIntent}
+                  onPortfolioContextChange={setPortfolioContext}
+                />
               </motion.div>
             )}
           </div>
@@ -171,26 +183,16 @@ export default function Home() {
 
         {/* Right: AI Assistant */}
         <div
-          className="w-full md:w-[380px] flex flex-col border-t md:border-t-0 border-border"
-          style={{ height: "calc(100vh - 57px)" }}
+          className="w-full h-[620px] md:h-auto md:w-[380px] flex flex-col border-t md:border-t-0 border-border min-h-0"
         >
           <AIAssistant
               onSwapIntent={handleSwapIntent}
               onBatchSwapIntent={handleBatchSwapIntent}
               quoteContext={quoteContext}
+              appContext={{ activeTab, portfolio: portfolioContext }}
             />
         </div>
       </motion.main>
-
-      {/* ── FOOTER ──────────────────────────────────────── */}
-      <motion.footer variants={itemVariants} className="border-t border-border px-6 py-3 flex items-center justify-between relative z-10 bg-background/80 backdrop-blur-sm">
-        <p className="text-[10px] text-muted-foreground font-mono tracking-wide">
-          Built on Uniswap v4 · Powered by Groq AI
-        </p>
-        <p className="text-[10px] text-muted-foreground font-mono">
-          Testnet only — no real funds
-        </p>
-      </motion.footer>
     </motion.div>
   );
 }

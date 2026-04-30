@@ -24,10 +24,9 @@ export function TokenBalanceRow({ balance, index }: TokenBalanceRowProps) {
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.06 }}
-      className="flex items-center gap-3 py-2.5 border-b border-border/40 last:border-0"
+      className="mb-2 flex items-center gap-3 rounded-xl border border-white/10 bg-background/55 px-3 py-3 last:mb-0"
     >
-      {/* Token color dot */}
-      <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold"
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold"
         style={{ backgroundColor: `${color}22`, border: `1px solid ${color}44`, color }}
       >
         {balance.token.symbol.slice(0, 1)}
@@ -35,10 +34,12 @@ export function TokenBalanceRow({ balance, index }: TokenBalanceRowProps) {
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-sm font-medium">{balance.token.symbol}</span>
-          <span className="text-sm font-mono text-foreground/80">{balance.human}</span>
+          <div className="min-w-0">
+            <span className="text-sm font-medium">{balance.token.symbol}</span>
+            <p className="truncate text-[10px] text-muted-foreground">{balance.token.name}</p>
+          </div>
+          <span className="shrink-0 text-sm font-mono text-foreground/80">{balance.human}</span>
         </div>
-        {/* Percentage bar */}
         <div className="h-1 rounded-full bg-muted/50 overflow-hidden">
           <motion.div
             className="h-full rounded-full"
@@ -51,11 +52,11 @@ export function TokenBalanceRow({ balance, index }: TokenBalanceRowProps) {
       </div>
 
       <div className="text-right flex-shrink-0">
-        <div className="text-[10px] text-muted-foreground font-mono">
+        <div className="text-[11px] text-muted-foreground font-mono">
           {balance.percentage.toFixed(1)}%
         </div>
         <div className="text-[10px] text-muted-foreground/60 font-mono">
-          ~${balance.usdValue.toFixed(0)}
+          ${balance.usdValue.toFixed(2)}
         </div>
       </div>
     </motion.div>

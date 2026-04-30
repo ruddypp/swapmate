@@ -24,15 +24,15 @@ export function PortfolioPieChart({ balances }: PortfolioPieChartProps) {
   const cy = size / 2;
   const strokeWidth = 20;
 
-  // Calculate segments
   const total = balances.reduce((sum, b) => sum + b.percentage, 0);
-  let cumulative = 0;
 
-  const segments = balances.map((b) => {
+  const segments = balances.map((b, index) => {
+    const previous = balances
+      .slice(0, index)
+      .reduce((sum, item) => sum + (total > 0 ? item.percentage / total : 0), 0);
     const pct = total > 0 ? b.percentage / total : 0;
-    const startAngle = cumulative * 360 - 90;
-    cumulative += pct;
-    const endAngle = cumulative * 360 - 90;
+    const startAngle = previous * 360 - 90;
+    const endAngle = (previous + pct) * 360 - 90;
 
     const startRad = (startAngle * Math.PI) / 180;
     const endRad = (endAngle * Math.PI) / 180;
@@ -49,13 +49,15 @@ export function PortfolioPieChart({ balances }: PortfolioPieChartProps) {
   });
 
   return (
-    <div className="flex items-center gap-6">
+    <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:gap-6">
       <motion.svg
         width={size}
         height={size}
+        viewBox={`0 0 ${size} ${size}`}
         initial={{ opacity: 0, rotate: -90 }}
         animate={{ opacity: 1, rotate: 0 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
+        className="shrink-0"
       >
         {segments.map((seg, i) => (
           <motion.path
@@ -73,14 +75,14 @@ export function PortfolioPieChart({ balances }: PortfolioPieChartProps) {
       </motion.svg>
 
       {/* Legend */}
-      <div className="space-y-2 flex-1">
+      <div className="w-full flex-1 space-y-2">
         {balances.map((b, i) => (
           <motion.div
             key={b.token.symbol}
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.3 + i * 0.07 }}
-            className="flex items-center gap-2"
+            className="flex items-center gap-2 rounded-sm border border-white/10 bg-white/[0.03] px-2 py-1.5"
           >
             <div
               className="w-2 h-2 rounded-full flex-shrink-0"

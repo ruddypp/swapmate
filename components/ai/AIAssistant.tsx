@@ -1,13 +1,16 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAppKitAccount } from "@reown/appkit/react";
+import { BookOpen, ChartPie, History as HistoryIcon } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import type { AIMessage, ParsedSwapIntent, QuoteResult, BatchSwapIntent, BatchSwapItem } from "@/lib/swap/types";
+import type { AIMessage, ParsedSwapIntent, QuoteResult, BatchSwapIntent, BatchSwapItem, SwapRecord } from "@/lib/swap/types";
 import type { Token } from "@/lib/swap/types";
+import type { PortfolioContextSnapshot } from "@/lib/portfolio/types";
 
 interface AIAssistantProps {
   onSwapIntent?: (intent: ParsedSwapIntent) => void;
@@ -17,6 +20,106 @@ interface AIAssistantProps {
     tokenOut?: Token;
     amountIn?: string;
     quote?: QuoteResult | null;
+  };
+  appContext?: {
+    activeTab: "swap" | "history" | "portfolio";
+    portfolio: PortfolioContextSnapshot;
+  };
+}
+
+interface SwapHistoryContext {
+  total: number;
+  confirmed: number;
+  pending: number;
+  failed: number;
+  uniquePairs: number;
+  recent: Array<{
+    route: string;
+    amountIn: string;
+    amountOut: string;
+    status: SwapRecord["status"];
+    chainId: number;
+    timestamp: string;
+    txHash: string;
+  }>;
+}
+
+function readSwapHistoryContext(): SwapHistoryContext {
+  if (typeof window === "undefined") {
+    return { total: 0, confirmed: 0, pending: 0, failed: 0, uniquePairs: 0, recent: [] };
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem("swapmate_history") ?? "[]");
+    const records: SwapRecord[] = Array.isArray(parsed) ? parsed : [];
+    const pairs = new Set(records.map((rec) => `${rec.tokenIn.symbol}/${rec.tokenOut.symbol}`));
+
+    return {
+      total: records.length,
+      confirmed: records.filter((rec) => rec.status === "confirmed").length,
+      pending: records.filter((rec) => rec.status === "pending").length,
+      failed: records.filter((rec) => rec.status === "failed").length,
+      uniquePairs: pairs.size,
+      recent: records.slice(0, 8).map((rec) => ({
+        route: `${rec.tokenIn.symbol} -> ${rec.tokenOut.symbol}`,
+        amountIn: `${rec.amountIn} ${rec.tokenIn.symbol}`,
+        amountOut: `${rec.amountOut} ${rec.tokenOut.symbol}`,
+        status: rec.status,
+        chainId: rec.chainId,
+        timestamp: new Date(rec.timestamp).toISOString(),
+        txHash: `${rec.txHash.slice(0, 10)}...${rec.txHash.slice(-6)}`,
+      })),
+    };
+  } catch {
+    return { total: 0, confirmed: 0, pending: 0, failed: 0, uniquePairs: 0, recent: [] };
+  }
+}
+
+function buildAssistantContext({
+  quoteContext,
+  appContext,
+  address,
+  isConnected,
+}: {
+  quoteContext?: AIAssistantProps["quoteContext"];
+  appContext?: AIAssistantProps["appContext"];
+  address?: string;
+  isConnected: boolean;
+}) {
+  const quote = quoteContext?.quote;
+
+  return {
+    wallet: {
+      isConnected,
+      address: address ? `${address.slice(0, 8)}...${address.slice(-6)}` : null,
+      network: "Sepolia testnet",
+    },
+    activeTab: appContext?.activeTab ?? "swap",
+    currentSwap: {
+      tokenIn: quoteContext?.tokenIn?.symbol,
+      tokenOut: quoteContext?.tokenOut?.symbol,
+      amountIn: quoteContext?.amountIn,
+      quote: quote
+        ? {
+            amountOut: quote.amountOut,
+            amountOutMin: quote.amountOutMin,
+            priceImpact: quote.priceImpact,
+            gasEstimate: quote.gasEstimate,
+            route: quote.route,
+            poolFee: quote.poolFee,
+            hookLabel: quote.hookLabel,
+          }
+        : null,
+    },
+    swapHistory: readSwapHistoryContext(),
+    portfolio: appContext?.portfolio ?? null,
+    assistantModes: [
+      "swap intent control",
+      "history analysis",
+      "portfolio analysis",
+      "DeFi education",
+      "Uniswap v4 explanation",
+    ],
   };
 }
 
@@ -94,14 +197,14 @@ function MessageBubble({ msg }: { msg: AIMessage }) {
   );
 }
 
-export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext }: AIAssistantProps) {
-  const { isConnected } = useAppKitAccount();
+export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext, appContext }: AIAssistantProps) {
+  const { isConnected, address } = useAppKitAccount();
   const [messages, setMessages] = useState<AIMessage[]>([
     {
       id: "init",
       role: "assistant",
       content:
-        "I can help you swap tokens on Uniswap v4 Sepolia. Try: \"swap 0.1 ETH to USDC\" or ask me about price impact, slippage, or how swaps work.",
+        "I can help with swaps, history, portfolio analysis, and DeFi education on Uniswap v4 Sepolia. Try: \"analyze my portfolio\", \"review my history\", or \"swap 0.1 ETH to USDC\".",
       timestamp: Date.now(),
     },
   ]);
@@ -117,7 +220,7 @@ export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext }: A
   // When quote context changes, auto-trigger AI analysis
   useEffect(() => {
     if (!quoteContext?.quote) return;
-    const { tokenIn, tokenOut, amountIn, quote } = quoteContext;
+    const { tokenIn, tokenOut, amountIn } = quoteContext;
     if (!tokenIn || !tokenOut || !amountIn) return;
 
     const analysisMsg = `Quote received: ${amountIn} ${tokenIn.symbol} → analyze this quote for me.`;
@@ -157,7 +260,12 @@ export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext }: A
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: historyForApi,
-          context: ctx ?? quoteContext,
+          context: buildAssistantContext({
+            quoteContext: ctx ?? quoteContext,
+            appContext,
+            address,
+            isConnected,
+          }),
         }),
       });
 
@@ -193,7 +301,7 @@ export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext }: A
           onSwapIntent(intent);
         }
       }
-    } catch (err) {
+    } catch {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
@@ -215,6 +323,24 @@ export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext }: A
     }
   }
 
+  const promptChips = [
+    {
+      label: "History",
+      prompt: "Analyze my swap history. What trading patterns and risks should I watch?",
+      icon: HistoryIcon,
+    },
+    {
+      label: "Portfolio",
+      prompt: "Analyze my portfolio and give practical suggestions for Sepolia testnet.",
+      icon: ChartPie,
+    },
+    {
+      label: "Education",
+      prompt: "Explain price impact, slippage, and Uniswap v4 hooks in simple language.",
+      icon: BookOpen,
+    },
+  ];
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -226,10 +352,12 @@ export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext }: A
             className="relative"
           >
             <div className={`absolute -inset-1 bg-primary/30 rounded-full blur-md transition-opacity duration-700 ${isStreaming ? "opacity-100" : "opacity-0"}`} />
-            <img 
-              src="/images/robot-avatar.png" 
-              alt="SwapMate AI Mascot" 
-              className="w-10 h-10 rounded-full object-cover border border-border/50 relative z-10 shadow-sm bg-card" 
+            <Image
+              src="/images/robot-avatar.png"
+              alt="SwapMate AI Mascot"
+              width={40}
+              height={40}
+              className="w-10 h-10 rounded-full object-cover border border-border/50 relative z-10 shadow-sm bg-card"
             />
           </motion.div>
           <div className="flex flex-col">
@@ -275,6 +403,20 @@ export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext }: A
 
       {/* Input */}
       <div className="p-3 space-y-2">
+        <div className="grid grid-cols-3 gap-2">
+          {promptChips.map(({ label, prompt, icon: Icon }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => sendMessage(prompt)}
+              disabled={isStreaming}
+              className="inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-sm border border-white/10 bg-white/[0.03] px-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{label}</span>
+            </button>
+          ))}
+        </div>
         <Textarea
           ref={textareaRef}
           id="ai-input"
@@ -283,10 +425,10 @@ export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext }: A
           onKeyDown={handleKeyDown}
           placeholder={
             isConnected
-              ? 'Try "swap 0.5 ETH to USDC" or ask a question...'
-              : "Connect your wallet to get started..."
+              ? 'Ask about swaps, history, portfolio, or DeFi concepts...'
+              : "Ask DeFi questions, or connect wallet for portfolio context..."
           }
-          disabled={isStreaming || !isConnected}
+          disabled={isStreaming}
           rows={2}
           className="resize-none text-sm rounded-sm border-border focus:border-primary/40 bg-muted/30 placeholder:text-muted-foreground/50 transition-colors"
         />
@@ -294,7 +436,7 @@ export function AIAssistant({ onSwapIntent, onBatchSwapIntent, quoteContext }: A
           id="ai-send-btn"
           size="sm"
           onClick={() => input.trim() && sendMessage(input.trim())}
-          disabled={isStreaming || !input.trim() || !isConnected}
+          disabled={isStreaming || !input.trim()}
           className="w-full rounded-sm uppercase tracking-widest text-[10px] font-medium bg-primary hover:bg-primary/90 transition-all duration-200"
         >
           {isStreaming ? "Thinking..." : "Send"}

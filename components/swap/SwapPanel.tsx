@@ -1,26 +1,25 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { usePublicClient, useWalletClient } from "wagmi";
 import { useAppKitAccount } from "@reown/appkit/react";
 import { type Address } from "viem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
-import type { Token, QuoteResult, ParsedSwapIntent, SwapRecord, BatchSwapIntent, BatchSwapItem } from "@/lib/swap/types";
+import type { Token, QuoteResult, ParsedSwapIntent, SwapRecord, BatchSwapIntent, BatchSwapItem, HookSentinelReport } from "@/lib/swap/types";
 import { SEPOLIA_TOKENS, NATIVE_ETH, USDC_SEPOLIA } from "@/lib/swap/tokens";
 import { formatAmount, parseAmount } from "@/lib/swap/quote";
 import { ensureApprovals, buildSwapCalldata, executeSwapTx } from "@/lib/swap/execute";
+import { buildHookSentinelReport } from "@/lib/swap/sentinel";
 import { BatchSwapCard } from "./BatchSwapCard";
 import { RiskBanner } from "./RiskBanner";
+import { SwapResultModal } from "./SwapResultModal";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -111,6 +110,10 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
   const [quote, setQuote] = useState<QuoteResult | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [sentinelReport, setSentinelReport] = useState<HookSentinelReport | null>(null);
+  const [sentinelLoading, setSentinelLoading] = useState(false);
+  const [sentinelError, setSentinelError] = useState<string | null>(null);
+  const [resultOpen, setResultOpen] = useState(false);
 
   const [autoExecute, setAutoExecute] = useState(false);
   const [pendingQuoteFetch, setPendingQuoteFetch] = useState(false);
@@ -165,54 +168,117 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
   }, []);
 
   useEffect(() => {
-    if (prefillIntent) {
+    if (!prefillIntent) return;
+
+    const id = window.setTimeout(() => {
       applyIntent(prefillIntent);
       onClearIntent?.();
-    }
+    }, 0);
+
+    return () => window.clearTimeout(id);
   }, [prefillIntent, applyIntent, onClearIntent]);
 
   // Effect to auto-fetch quote when intent parameters are settled
   useEffect(() => {
-    if (pendingQuoteFetch && amountIn && parseFloat(amountIn) > 0) {
+    if (!(pendingQuoteFetch && amountIn && parseFloat(amountIn) > 0)) return;
+
+    const id = window.setTimeout(() => {
       setPendingQuoteFetch(false);
       fetchQuote();
-    }
+    }, 0);
+
+    return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingQuoteFetch, amountIn, tokenIn, tokenOut, slippageBps]);
 
   // Effect to auto-execute when quote is ready
   useEffect(() => {
-    if (quote && autoExecute && swapStep === "idle" && isConnected) {
+    if (!(quote && autoExecute && sentinelReport && !sentinelLoading && swapStep === "idle" && isConnected)) return;
+
+    const id = window.setTimeout(() => {
       setAutoExecute(false);
       executeSwap();
-    }
+    }, 0);
+
+    return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quote, autoExecute, swapStep, isConnected]);
+  }, [quote, autoExecute, sentinelReport, sentinelLoading, swapStep, isConnected]);
 
   // Apply batch intent from AI
   useEffect(() => {
-    if (batchIntent && batchIntent.swaps.length > 0) {
+    if (!(batchIntent && batchIntent.swaps.length > 0)) return;
+
+    const id = window.setTimeout(() => {
       setBatchItems(batchIntent.swaps);
       setAiRiskNote(null);
       onClearBatch?.();
-    }
+    }, 0);
+
+    return () => window.clearTimeout(id);
   }, [batchIntent, onClearBatch]);
 
   function swapTokens() {
     setTokenIn(tokenOut);
     setTokenOut(tokenIn);
-    setQuote(null);
+    clearQuoteState();
     setAmountIn("");
+  }
+
+  function clearQuoteState() {
+    setQuote(null);
     setQuoteError(null);
+    setSentinelReport(null);
+    setSentinelError(null);
+    setSentinelLoading(false);
+    setResultOpen(false);
+  }
+
+  async function fetchSentinel(result: QuoteResult) {
+    const fallback = buildHookSentinelReport({
+      tokenIn,
+      tokenOut,
+      amountInHuman: amountIn,
+      slippageBps,
+      quote: result,
+    });
+
+    setSentinelLoading(true);
+    setSentinelError(null);
+    setSentinelReport(null);
+
+    try {
+      const res = await fetch("/api/swap/sentinel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tokenIn,
+          tokenOut,
+          amountInHuman: amountIn,
+          slippageBps,
+          quote: result,
+        }),
+      });
+
+      if (!res.ok) throw new Error("AI Sentinel fallback active");
+      const report: HookSentinelReport = await res.json();
+      setSentinelReport(report);
+    } catch {
+      setSentinelReport(fallback);
+    } finally {
+      setSentinelLoading(false);
+    }
   }
 
   // ─── FETCH QUOTE ────────────────────────────────────────────────────────────
 
   async function fetchQuote() {
     if (!amountIn || parseFloat(amountIn) <= 0) return;
+    setResultOpen(true);
     setQuoteLoading(true);
     setQuoteError(null);
     setQuote(null);
+    setSentinelReport(null);
+    setSentinelError(null);
 
     try {
       const rawAmount = parseAmount(amountIn, tokenIn.decimals);
@@ -230,6 +296,7 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
       const result: QuoteResult = await res.json();
       setQuote(result);
       onQuoteUpdate?.({ tokenIn, tokenOut, amountIn, quote: result });
+      void fetchSentinel(result);
     } catch (err) {
       setQuoteError(err instanceof Error ? err.message : "Quote failed");
     } finally {
@@ -242,6 +309,17 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
   async function executeSwap() {
     if (!quote || !address || !walletClient || !publicClient) return;
     setSwapError(null);
+
+    if (sentinelLoading || !sentinelReport) {
+      setSwapError("AI Hook Sentinel is still scanning this route.");
+      return;
+    }
+
+    if (sentinelReport.status === "blocked") {
+      const reason = sentinelReport.blockers[0] ?? "guardrail breach";
+      setSwapError(`AI Hook Sentinel blocked this trade: ${reason}`);
+      return;
+    }
 
     const rawIn = BigInt(parseAmount(amountIn, tokenIn.decimals));
 
@@ -337,6 +415,17 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
         });
         if (!qRes.ok) throw new Error("Quote failed");
         const quote: QuoteResult = await qRes.json();
+        const sentinel = buildHookSentinelReport({
+          tokenIn,
+          tokenOut,
+          amountInHuman: item.amount,
+          slippageBps: slipBps,
+          quote,
+        });
+
+        if (sentinel.status === "blocked") {
+          throw new Error(`Sentinel blocked: ${sentinel.blockers[0] ?? "guardrail breach"}`);
+        }
 
         // Step 2: Execute swap
         setBatchItems(prev => prev.map((it, idx) => idx === i ? { ...it, status: "swapping", quote } : it));
@@ -371,7 +460,17 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
   }
 
   const amountOut = quote ? formatAmount(quote.amountOut, tokenOut.decimals) : "";
+  const minReceived = quote ? formatAmount(quote.amountOutMin, tokenOut.decimals) : "";
   const isBusy = swapStep !== "idle" && swapStep !== "done";
+  const sentinelBlocked = sentinelReport?.status === "blocked";
+  const executeDisabled = isBusy || sentinelLoading || sentinelBlocked;
+  const actionLabel = sentinelLoading
+    ? "AI Sentinel scanning..."
+    : sentinelBlocked
+    ? "Blocked by AI Sentinel"
+    : isBusy
+    ? STEP_LABELS[swapStep].replace("...", "")
+    : `Swap ${tokenIn.symbol} → ${tokenOut.symbol}`;
 
   function reset() {
     setQuote(null);
@@ -381,6 +480,10 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
     setAmountIn("");
     setAiRiskNote(null);
     setAiTunedSlippage(false);
+    setSentinelReport(null);
+    setSentinelError(null);
+    setSentinelLoading(false);
+    setResultOpen(false);
   }
 
   function resetBatch() {
@@ -389,11 +492,11 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
   }
 
   return (
-    <div className="space-y-4">
+    <div className="h-full min-h-0 space-y-4">
 
       {/* ── BATCH MODE UI ── */}
       {isBatchMode && (
-        <div className="space-y-3">
+        <div className="h-full overflow-y-auto custom-scrollbar space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground">
               Batch Plan — {batchItems.length} swaps
@@ -431,230 +534,149 @@ export function SwapPanel({ onSwapComplete, onQuoteUpdate, prefillIntent, onClea
 
       {/* ── SINGLE SWAP MODE UI ── */}
       {!isBatchMode && (
-        <div className="space-y-6">
-      {/* AI Risk Note Banner */}
-      {aiRiskNote && (
-        <RiskBanner message={aiRiskNote} severity="warning" />
-      )}
+        <div className="grid h-full min-h-0 w-full items-start gap-4 lg:grid-cols-[minmax(300px,390px)_minmax(360px,1fr)] xl:gap-6">
+          <div className="custom-scrollbar h-full min-h-0 min-w-0 overflow-y-auto space-y-4 rounded-2xl border border-white/10 bg-card/35 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.22)] backdrop-blur-sm">
+            {aiRiskNote && (
+              <RiskBanner message={aiRiskNote} severity="warning" />
+            )}
 
-      {/* Token In */}
-      <div className="space-y-2">
-        <TokenSelector
-          id="token-in-select"
-          label="You Pay"
-          value={tokenIn}
-          onChange={(t) => { setTokenIn(t); setQuote(null); setQuoteError(null); }}
-          exclude={tokenOut}
-        />
-        <Input
-          id="amount-in-input"
-          type="number"
-          min="0"
-          step="any"
-          placeholder="0.00"
-          value={amountIn}
-          onChange={(e) => { setAmountIn(e.target.value); setQuote(null); setQuoteError(null); }}
-          className="text-lg font-mono rounded-sm border-border bg-muted/30 hover:bg-muted/50 focus:border-primary/40 transition-colors h-12"
-        />
-      </div>
+            <div className="space-y-2">
+              <TokenSelector
+                id="token-in-select"
+                label="You Pay"
+                value={tokenIn}
+                onChange={(t) => { setTokenIn(t); clearQuoteState(); }}
+                exclude={tokenOut}
+              />
+              <Input
+                id="amount-in-input"
+                type="number"
+                min="0"
+                step="any"
+                placeholder="0.00"
+                value={amountIn}
+                onChange={(e) => { setAmountIn(e.target.value); clearQuoteState(); }}
+                className="h-12 rounded-sm border-border bg-muted/30 font-mono text-lg transition-colors hover:bg-muted/50 focus:border-primary/40"
+              />
+            </div>
 
-      {/* Direction toggle */}
-      <div className="flex items-center gap-3">
-        <div className="flex-1 h-px bg-border" />
-        <button
-          id="swap-direction-btn"
-          onClick={swapTokens}
-          className="text-muted-foreground hover:text-foreground text-xs font-mono tracking-widest transition-colors duration-150 px-2"
-          title="Swap direction"
-        >
-          ↕
-        </button>
-        <div className="flex-1 h-px bg-border" />
-      </div>
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-border" />
+              <button
+                id="swap-direction-btn"
+                onClick={swapTokens}
+                className="px-2 text-xs font-mono tracking-widest text-muted-foreground transition-colors duration-150 hover:text-foreground"
+                title="Swap direction"
+              >
+                ↕
+              </button>
+              <div className="h-px flex-1 bg-border" />
+            </div>
 
-      {/* Token Out */}
-      <div className="space-y-2">
-        <TokenSelector
-          id="token-out-select"
-          label="You Receive"
-          value={tokenOut}
-          onChange={(t) => { setTokenOut(t); setQuote(null); setQuoteError(null); }}
-          exclude={tokenIn}
-        />
-        <div className="h-12 px-3 flex items-center border border-border rounded-sm bg-muted/20 font-mono text-lg text-muted-foreground">
-          {quoteLoading ? (
-            <span className="text-sm animate-pulse">Fetching quote...</span>
-          ) : (
-            <span className={amountOut ? "text-foreground" : ""}>
-              {amountOut || "0.00"}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Slippage */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between">
-          <p className="text-label">Slippage Tolerance</p>
-          {aiTunedSlippage && (
-            <span className="text-[9px] font-mono text-primary tracking-wider animate-pulse">⚡ AI TUNED</span>
-          )}
-        </div>
-        <div className="flex gap-2">
-          {SLIPPAGE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              id={`slippage-${opt.value}`}
-              onClick={() => setSlippageBps(opt.value)}
-              className={`flex-1 py-1.5 text-xs font-mono rounded-sm border transition-all duration-150 ${
-                slippageBps === opt.value
-                  ? "border-primary/60 text-primary bg-primary/10"
-                  : "border-border text-muted-foreground hover:border-border/80"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Quote details */}
-      <AnimatePresence>
-        {quote && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-            className="space-y-2 overflow-hidden"
-          >
-            <Separator />
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Route</span>
-                <span className="font-mono text-foreground/80">
-                  {quote.route} · {quote.poolFee ? `${(quote.poolFee / 10000).toFixed(2)}% fee` : ""}
-                </span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Price Impact</span>
-                <span className={`font-mono ${quote.priceImpact > 1 ? "text-destructive" : "text-foreground/80"}`}>
-                  ~{quote.priceImpact.toFixed(2)}%
-                </span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Est. Gas</span>
-                <span className="font-mono text-foreground/80">{quote.gasEstimate} ETH</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Min. Received</span>
-                <span className="font-mono text-foreground/80">
-                  {formatAmount(quote.amountOutMin, tokenOut.decimals)} {tokenOut.symbol}
-                </span>
+            <div className="space-y-2">
+              <TokenSelector
+                id="token-out-select"
+                label="You Receive"
+                value={tokenOut}
+                onChange={(t) => { setTokenOut(t); clearQuoteState(); }}
+                exclude={tokenIn}
+              />
+              <div className="flex h-12 items-center rounded-sm border border-border bg-muted/20 px-3 font-mono text-lg text-muted-foreground">
+                {quoteLoading ? (
+                  <span className="text-sm animate-pulse">Fetching quote...</span>
+                ) : (
+                  <span className={amountOut ? "text-foreground" : ""}>
+                    {amountOut || "0.00"}
+                  </span>
+                )}
               </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      {/* Errors */}
-      <AnimatePresence>
-        {(quoteError || swapError) && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="p-3 border border-destructive/30 rounded-sm bg-destructive/5"
-          >
-            <p className="text-xs text-destructive font-mono leading-relaxed">
-              {quoteError || swapError}
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <p className="text-label">Slippage Tolerance</p>
+                {aiTunedSlippage && (
+                  <span className="text-[9px] font-mono tracking-wider text-primary animate-pulse">AI TUNED</span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {SLIPPAGE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    id={`slippage-${opt.value}`}
+                    onClick={() => setSlippageBps(opt.value)}
+                    className={`flex-1 rounded-sm border py-1.5 text-xs font-mono transition-all duration-150 ${
+                      slippageBps === opt.value
+                        ? "border-primary/60 bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:border-border/80"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-      {/* Step indicator */}
-      <AnimatePresence>
-        {isBusy && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex items-center gap-2"
-          >
-            <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-            <p className="text-xs text-muted-foreground font-mono tracking-wide">
-              {STEP_LABELS[swapStep]}
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <div className="space-y-2 pt-1">
+              {!quote ? (
+                <Button
+                  id="get-quote-btn"
+                  onClick={fetchQuote}
+                  disabled={!amountIn || parseFloat(amountIn) <= 0 || quoteLoading}
+                  variant="secondary"
+                  className="h-11 w-full rounded-sm bg-secondary text-[11px] font-medium uppercase tracking-widest text-secondary-foreground transition-all duration-200 hover:bg-secondary/80"
+                >
+                  {quoteLoading ? "Fetching Quote..." : "Get Quote"}
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    id="refresh-quote-btn"
+                    onClick={fetchQuote}
+                    disabled={quoteLoading || isBusy}
+                    variant="secondary"
+                    className="h-11 w-full rounded-sm bg-secondary text-[11px] font-medium uppercase tracking-widest text-secondary-foreground transition-all duration-200 hover:bg-secondary/80"
+                  >
+                    {quoteLoading ? "Refreshing..." : "Refresh Quote"}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => setResultOpen(true)}
+                    className="h-11 w-full rounded-sm bg-primary text-[11px] font-medium uppercase tracking-widest text-primary-foreground transition-all duration-200 hover:bg-primary/90 lg:hidden"
+                  >
+                    Open Result
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
 
-      {/* TX confirmed link */}
-      <AnimatePresence>
-        {swapStep === "done" && txHash && (
-          <motion.div
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex items-center justify-between text-xs border border-border/40 rounded-sm px-3 py-2"
-          >
-            <span className="text-muted-foreground">Confirmed</span>
-            <a
-              href={`https://sepolia.etherscan.io/tx/${txHash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono text-primary hover:underline"
-            >
-              {txHash.slice(0, 10)}...{txHash.slice(-6)} ↗
-            </a>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Action buttons */}
-      <div className="space-y-2">
-        {swapStep === "done" ? (
-          <Button
-            id="swap-again-btn"
-            onClick={reset}
-            className="w-full rounded-sm uppercase tracking-widest text-[11px] font-medium h-11 bg-secondary hover:bg-secondary/80 text-secondary-foreground"
-            variant="secondary"
-          >
-            Swap Again
-          </Button>
-        ) : !quote ? (
-          <Button
-            id="get-quote-btn"
-            onClick={fetchQuote}
-            disabled={!amountIn || parseFloat(amountIn) <= 0 || quoteLoading}
-            variant="secondary"
-            className="w-full rounded-sm uppercase tracking-widest text-[11px] font-medium bg-secondary hover:bg-secondary/80 text-secondary-foreground transition-all duration-200 h-11"
-          >
-            {quoteLoading ? "Fetching Quote..." : "Get Quote"}
-          </Button>
-        ) : (
-          <Button
-            id="execute-swap-btn"
-            onClick={executeSwap}
-            disabled={!isConnected || isBusy}
-            className="w-full rounded-sm uppercase tracking-widest text-[11px] font-medium h-11 bg-primary hover:bg-primary/90 text-primary-foreground transition-all duration-200"
-          >
-            {isBusy
-              ? STEP_LABELS[swapStep].replace("...", "")
-              : `Swap ${tokenIn.symbol} → ${tokenOut.symbol}`}
-          </Button>
-        )}
-
-        {quote && swapStep === "idle" && (
-          <button
-            onClick={() => { setQuote(null); setQuoteError(null); }}
-            className="w-full text-[10px] text-muted-foreground hover:text-foreground tracking-widest uppercase transition-colors"
-          >
-            Reset
-          </button>
-        )}
-      </div>
-      </div>
+          <SwapResultModal
+            quote={quote}
+            quoteLoading={quoteLoading}
+            quoteError={quoteError}
+            swapError={swapError}
+            sentinelReport={sentinelReport}
+            sentinelLoading={sentinelLoading}
+            sentinelError={sentinelError}
+            tokenIn={tokenIn}
+            tokenOut={tokenOut}
+            amountIn={amountIn}
+            amountOut={amountOut}
+            minReceived={minReceived}
+            isConnected={isConnected}
+            isBusy={isBusy}
+            isDone={swapStep === "done"}
+            isMobileOpen={resultOpen}
+            txHash={txHash}
+            stepLabel={STEP_LABELS[swapStep]}
+            actionLabel={actionLabel}
+            executeDisabled={executeDisabled}
+            onExecute={executeSwap}
+            onReset={reset}
+            onCloseMobile={() => setResultOpen(false)}
+          />
+        </div>
       )}
     </div>
   );

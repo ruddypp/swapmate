@@ -28,10 +28,44 @@ export interface QuoteResult {
   route: "SINGLE_HOP" | "MULTI_HOP";
   poolFee?: number;
   tickSpacing?: number;
+  hookAddress?: string;
+  hookLabel?: string;
   // v4 sorted pool info (needed for execution)
   currency0?: string;
   currency1?: string;
   zeroForOne?: boolean;
+}
+
+// ─── AI HOOK SENTINEL ───────────────────────────────────
+
+export type SentinelStatus = "clear" | "caution" | "blocked";
+export type SentinelCheckState = "pass" | "watch" | "fail";
+
+export interface TradeGuardrails {
+  maxPriceImpact: number;
+  maxSlippageBps: number;
+  blockCustomHooks: boolean;
+}
+
+export interface SentinelCheck {
+  label: string;
+  value: string;
+  state: SentinelCheckState;
+  detail: string;
+}
+
+export interface HookSentinelReport {
+  status: SentinelStatus;
+  title: string;
+  summary: string;
+  hookAddress: string;
+  hookLabel: string;
+  confidence: number;
+  generatedBy: "rules" | "ai";
+  policy: TradeGuardrails;
+  checks: SentinelCheck[];
+  recommendations: string[];
+  blockers: string[];
 }
 
 // ─── SWAP HISTORY ─────────────────────────────────────
