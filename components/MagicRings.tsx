@@ -110,8 +110,13 @@ export default function MagicRings({
   parallax = 0.05,
   clickBurst = false,
 }: MagicRingsProps) {
-  const mountRef = useRef(null);
-  const propsRef = useRef(null);
+  const mountRef = useRef<HTMLDivElement>(null);
+  const propsRef = useRef<MagicRingsProps>({
+    color, colorTwo, speed, ringCount, attenuation, lineThickness,
+    baseRadius, radiusStep, scaleRate, opacity, blur, noiseAmount,
+    rotation, ringGap, fadeIn, fadeOut, followMouse, mouseInfluence,
+    hoverScale, parallax, clickBurst,
+  });
   const mouseRef = useRef([0, 0]);
   const smoothMouseRef = useRef([0, 0]);
   const hoverAmountRef = useRef(0);
@@ -191,7 +196,7 @@ export default function MagicRings({
     const ro = new ResizeObserver(resize);
     ro.observe(mount);
 
-    const onMouseMove = (e: any) => {
+    const onMouseMove = (e: MouseEvent) => {
       const rect = mount.getBoundingClientRect();
       mouseRef.current[0] = (e.clientX - rect.left) / rect.width - 0.5;
       mouseRef.current[1] = -((e.clientY - rect.top) / rect.height - 0.5);
@@ -209,10 +214,10 @@ export default function MagicRings({
     mount.addEventListener('mouseleave', onMouseLeave);
     mount.addEventListener('click', onClick);
 
-    let frameId;
-    const animate = (t) => {
+    let frameId: number;
+    const animate = (t: number) => {
       frameId = requestAnimationFrame(animate);
-      const p = propsRef.current;
+      const p = propsRef.current as Required<MagicRingsProps>;
 
       smoothMouseRef.current[0] += (mouseRef.current[0] - smoothMouseRef.current[0]) * 0.08;
       smoothMouseRef.current[1] += (mouseRef.current[1] - smoothMouseRef.current[1]) * 0.08;

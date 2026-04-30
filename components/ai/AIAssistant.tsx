@@ -168,14 +168,48 @@ function parseBatchIntent(text: string): BatchSwapIntent | null {
   return null;
 }
 
+function stripMarkdown(text: string): string {
+  return text
+    // Remove fenced code blocks (```...```)
+    .replace(/```[\s\S]*?```/g, "")
+    // Remove inline code (`code`)
+    .replace(/`[^`]*`/g, "")
+    // Remove bold+italic (***text***)
+    .replace(/\*{3}([^*]+)\*{3}/g, "$1")
+    // Remove bold (**text**)
+    .replace(/\*{2}([^*]+)\*{2}/g, "$1")
+    // Remove italic (*text*)
+    .replace(/\*([^*]+)\*/g, "$1")
+    // Remove bold+italic (___text___)
+    .replace(/_{3}([^_]+)_{3}/g, "$1")
+    // Remove bold (__text__)
+    .replace(/_{2}([^_]+)_{2}/g, "$1")
+    // Remove italic (_text_)
+    .replace(/_([^_]+)_/g, "$1")
+    // Remove headings (## Heading)
+    .replace(/^#{1,6}\s+/gm, "")
+    // Remove horizontal rules (--- or ***)
+    .replace(/^[-*]{3,}\s*$/gm, "")
+    // Remove blockquotes (> text)
+    .replace(/^>\s*/gm, "")
+    // Remove unordered list markers (- item or * item)
+    .replace(/^[\-\*]\s+/gm, "")
+    // Remove ordered list markers (1. item)
+    .replace(/^\d+\.\s+/gm, "")
+    // Collapse 3+ newlines to 2
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function MessageBubble({ msg }: { msg: AIMessage }) {
   const isUser = msg.role === "user";
 
-  // Strip JSON blocks (with or without markdown) from display
-  const displayContent = msg.content
-    .replace(/```json[\s\S]*?```/g, "")
-    .replace(/\{[\s\S]*"intent"[\s\S]*\}/i, "")
-    .trim();
+  // Strip JSON blocks (with or without markdown) from display, then strip markdown
+  const displayContent = stripMarkdown(
+    msg.content
+      .replace(/```json[\s\S]*?```/g, "")
+      .replace(/\{[\s\S]*"intent"[\s\S]*\}/i, "")
+  );
 
   return (
     <motion.div

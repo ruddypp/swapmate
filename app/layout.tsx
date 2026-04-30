@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SwapMate — AI-Powered Token Swaps",
+  title: "SwapMate — AI-Powered Token Swap",
   description:
     "Swap tokens on Uniswap v4 with an AI assistant that explains quotes, warns about risks, and guides every step of the trade.",
   keywords: ["DeFi", "Uniswap", "AI", "token swap", "Sepolia", "Web3"],
